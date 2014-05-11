@@ -117,6 +117,38 @@ pub fn start(argc: int, argv: **u8, main: proc()) -> int {
     }
     ignore_sigpipe();
 
+    // In Windows when compiling a program for non-console "Windows" mode, i.e
+    // -Wl,--subsystem,windows, stdout and stderr file pointers are invalid.
+    // We reopen them re-directed into the null device "NUL".
+    #[cfg(not(windows))] fn sink_stdio() {}
+    #[cfg(windows)] fn sink_stdio() {
+        use libc;
+        use libc::types::common::c95::FILE;
+        // _fileno on Windows has a special return value to distinguish an
+        // error from the special case which is:
+        // "No stdout/stderr file because no console is open."
+        let no_file = -2;
+        extern "C" {
+            #[link(name = "stdout")]
+            static stdout: *FILE;
+            #[link(name = "stderr")]
+            static stderr: *FILE;
+        }
+
+        unsafe {
+            if libc::fileno(libc::stdout) == no_file {
+                let _ = libc::freopen("NUL".to_c_str().unwrap(), "a".to_c_str().unwrap(),
+                    libc::stdout);
+            }
+
+            if libc::fileno(libc::stderr) == no_file {
+                let _ = libc::freopen("NUL".to_c_str().unwrap(), "a".to_c_str().unwrap(),
+                    libc::stderr);
+            }
+        }
+    }
+    sink_stdio();
+
     rt::init(argc, argv);
     let mut exit_code = None;
     let mut main = Some(main);
